@@ -383,7 +383,7 @@ processAsyncResponse(UA_Client *client, UA_UInt32 requestId, const UA_NodeId *re
 /* Processes the received service response. Either with an async callback or by
  * decoding the message and returning it "upwards" in the
  * SyncResponseDescription. */
-static UA_StatusCode
+static void
 processServiceResponse(void *application, UA_SecureChannel *channel,
                        UA_MessageType messageType, UA_UInt32 requestId,
                        const UA_ByteString *message) {
@@ -394,16 +394,8 @@ processServiceResponse(void *application, UA_SecureChannel *channel,
        messageType != UA_MESSAGETYPE_MSG) {
         UA_LOG_TRACE_CHANNEL(rd->client->config.logger, channel,
                              "Invalid message type");
-        return UA_STATUSCODE_BADTCPMESSAGETYPEINVALID;
+        return;
     }
-
-    /* Has the SecureChannel timed out?
-     * TODO: Solve this for client and server together */
-    if(rd->client->state >= UA_CLIENTSTATE_SECURECHANNEL &&
-       (channel->securityToken.createdAt +
-        (channel->securityToken.revisedLifetime * UA_DATETIME_MSEC))
-       < UA_DateTime_nowMonotonic())
-        return UA_STATUSCODE_BADSECURECHANNELCLOSED;
 
     /* Forward declaration for the goto */
     UA_NodeId expectedNodeId = UA_NODEID_NULL;
@@ -465,16 +457,17 @@ finish:
             respHeader->serviceResult = retval;
         }
     }
-    return retval;
 }
 
 /* Forward complete chunks directly to the securechannel */
 static UA_StatusCode
 client_processChunk(void *application, UA_Connection *connection, UA_ByteString *chunk) {
     SyncResponseDescription *rd = (SyncResponseDescription*)application;
-    return UA_SecureChannel_processChunk(&rd->client->channel, chunk,
-                                         processServiceResponse,
-                                         rd);
+    UA_StatusCode retval = UA_SecureChannel_addChunk(&rd->client->channel, chunk);
+    if(retval != UA_STATUSCODE_GOOD)
+        return retval;
+    UA_SecureChannel_processMessages(&rd->client->channel, rd, processServiceResponse);
+    return UA_SecureChannel_persistChunks(&rd->client->channel);
 }
 
 /* Receive and process messages until a synchronous message arrives or the
