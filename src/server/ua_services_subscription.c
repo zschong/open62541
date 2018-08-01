@@ -352,6 +352,17 @@ Operation_CreateMonitoredItem(UA_Server *server, UA_Session *session, struct cre
         LIST_INSERT_HEAD(&server->localMonitoredItems, newMon, listEntry);
     }
 
+    /* Register MonitoredItem in userland */
+    if(server->config.monitoredItemRegisterCallback) {
+        void *targetContext = NULL;
+        UA_Server_getNodeContext(server, request->itemToMonitor.nodeId, &targetContext);
+        server->config.monitoredItemRegisterCallback(server, &session->sessionId,
+                                                     session->sessionHandle,
+                                                     &request->itemToMonitor.nodeId,
+                                                     targetContext, newMon->attributeId, false);
+        newMon->registered = true;
+    }
+
     /* Create the first sample */
     if(request->monitoringMode == UA_MONITORINGMODE_REPORTING)
         UA_MonitoredItem_sampleCallback(server, newMon);
